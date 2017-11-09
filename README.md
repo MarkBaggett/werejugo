@@ -8,7 +8,7 @@ Identifies physical locations where a laptop has been based upon multiple forens
     - *Wireless Diagnostic Event ID 6100 in SYSTEM.EVTX 
     - **Wireless Profile Names from SRUM.DAT
 
-* Google Disabled this API in September of 2017.  I'll have to rewrite this to use a different API which will most likely require you to obtain API keys.
+* Google Disabled this API in September on 2017.  I'll have to rewrite this to use a different API which will most likely require you to obtain API keys.
 
 ** Not yet implimented.
 
