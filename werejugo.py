@@ -13,7 +13,6 @@ import Evtx.Evtx
 import Evtx.Views
 import Evtx.Nodes
 import os
-import itertools
 
 try:
     input=raw_input
