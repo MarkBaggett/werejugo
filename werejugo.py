@@ -13,6 +13,7 @@ import Evtx.Evtx
 import Evtx.Views
 import Evtx.Nodes
 import os
+import simplekml
 
 try:
     input=raw_input
@@ -122,7 +123,7 @@ wigle_cache={}
 def wigle_search(**kwargs):
     #Lookup like this  wigle_search(netid="ff:ff:ff:ff:ff")
     if kwargs['netid'] in wigle_cache:
-        print("From Cache")
+        print("Retrieving " + kwargs['netid'] + " from Cache")
         return wigle_cache.get(kwargs['netid'])
     url = "https://api.wigle.net/api/v2/network/search"
     if not options.WIGLE_USER or not options.WIGLE_PASS:
@@ -215,6 +216,7 @@ parser.add_argument("--WLAN_EVENTS","-w", default="", help ="Location of WLAN Au
 parser.add_argument("--OUTPUT","-o", default="werejugo_output.xlsx", help ="Path and filename of the XLSX file to create.")
 parser.add_argument("--WIGLE_USER", "-u", help="Wigle.net API Username.  Required for geolocating  See https://wigle.net/account")
 parser.add_argument("--WIGLE_PASS", "-p", help="Wigle.net API Password.  Required for geolocating  See https://wigle.net/account")
+parser.add_argument("--KML", "-k", action="store_true", help="Outputs KML file based on Wigle results. Geolocation required.")
 
 options = parser.parse_args()
 
@@ -254,6 +256,8 @@ for column, value in enumerate(columns):
 
 
 #Do the wireless Data sheet
+unmanaged_cache = []
+managed_cache = []
 if options.SOFTWARE_REGISTRY:
     print("Enumerating Wireless Profiles in the Registry...")
     xls_sheet = target_wb.create_sheet(title="Wireless Data")
@@ -269,6 +273,7 @@ if options.SOFTWARE_REGISTRY:
             print("Unable to process file {0} : {1} ".format(eachfile,e))
         else:
             reg_data = network_history(reg_handle)
+            unmanaged_cache = reg_data
             for row, row_data in enumerate(reg_data):
                 for column, value in enumerate(row_data):
                     xls_sheet.cell(row = row+2, column = column+1).value = value
@@ -282,6 +287,7 @@ if options.SOFTWARE_REGISTRY:
             print("Unable to process file {0} : {1} ".format(eachfile,e))
         else:
             reg_data = network_history(reg_handle)
+            managed_cache = reg_data
             profile_table[reg_data[1]] = reg_data[0]
             for row, row_data in enumerate(reg_data):
                 for column, value in enumerate(row_data):
@@ -313,6 +319,7 @@ if options.SYSTEM_EVENTS:
     """
 
 #Do WLAN_AUTOCONFIG
+wlan_cache = []
 if options.WLAN_EVENTS:
     print("Enumerating WLAN Autoconfig Log data")
     xls_sheet = target_wb.create_sheet(title="WLAN Events Data")
@@ -322,6 +329,7 @@ if options.WLAN_EVENTS:
     for eachfile in wlan_evts_files:
         try:
             evt_data  = parse_wlan_autoconfig(eachfile)
+            wlan_cache = evt_data
         except Exception as e:
             print("Unable to process file {0} : {1} ".format(eachfile,e))
             continue
@@ -335,3 +343,40 @@ if options.WLAN_EVENTS:
 firstsheet=target_wb.get_sheet_by_name("Sheet")
 target_wb.remove_sheet(firstsheet)
 target_wb.save(options.OUTPUT)
+
+#Output KML
+if options.KML and not options.WIGLE_USER or not options.WIGLE_PASS:
+    print ("\nWARNING: Must use geolocation (Wigle) options to generate KML")
+elif options.KML:
+    print("Creating KML file")
+    kml = simplekml.Kml(name="Wifi Map",description="Visual Wigle Location")
+    for netid in wigle_cache:
+        result = wigle_cache.get(netid)
+        if result["results"]:
+            ssid = result['results'][0]['ssid']
+            lat = result['results'][0]['trilat']
+            lon = result['results'][0]['trilong']
+            lastSeen = result['results'][0]['lasttime']
+            pnt = kml.newpoint(name=ssid, coords=[(lon,lat)])
+            pnt.description = ""
+
+            #Check WLAN cache for actions
+            for action in wlan_cache:
+                if netid in action or ssid in action:
+                    pnt.description += "Action: %s\nTime: %s\n" % (action[0], action[3])
+
+            #Check unmanaged for entries
+            pnt.description += "\nUnmanaged:\n"
+            for entry in unmanaged_cache:
+                if netid in entry:
+                    pnt.description += "First Seen: %s\nLast Seen: %s\nDNS Suffix: %s\n" % (entry[5], entry[6], entry[3])
+
+            #Check managed for entries
+            pnt.description += "\nManaged:\n"
+            for entry in managed_cache:
+                if netid in entry:
+                    pnt.description += "First Seen: %s\nLast Seen: %s\nDNS Suffix: %s\n" % (entry[5], entry[6], entry[3])
+
+    kml.save(options.OUTPUT.strip("xlsx") + "kml")
+
+
