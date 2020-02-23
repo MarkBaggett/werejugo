@@ -1,0 +1,14 @@
+#This requires a google api key https://developers.google.com/maps/documentation/geolocation/get-api-key
+#Yes, it does require credit card but the first several thousand requests are free.
+google_api_url: 'https://www.googleapis.com/geolocation/v1/geolocate?key={key}'
+google_api_key: Your Key Here
+
+#This program requires a wigle api key.  Obtain one here https://api.wigle.net/
+wigle_api_url: https://api.wigle.net/api/v2/network/search
+wigle_api_user:  Wigle API Username 
+wigle_api_pass: Wigle API Password
+
+
+#Tuning
+#Maximum Delay between requests.
+http_max_delay: 3.0

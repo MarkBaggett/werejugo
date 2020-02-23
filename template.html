@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Werejugo Results</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/css/materialize.min.css">
+    <script src="https://unpkg.com/material-components-web@v4.0.0/dist/material-components-web.min.js"></script>
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+</head>
+
+<body>
+  <div class="container">
+    
+    <table>
+      <thead>
+        <tr>
+          <th>Date/Time</th>
+          <th>Source</th>
+          <th>Coordinate</th>
+          <th>Map</th>
+        </tr>
+      </thead>
+      <tbody>
+              !!!DATA!!!
+      </tbody>
+    </table>
+  </div>
+
+<script src="https://code.jquery.com/jquery-3.4.1.min.js" integrity="sha256-CSXorXvZcTkaix6Yvo6HppcZGetbYMGWSFlBw8HfCJo=" crossorigin="anonymous"></script>
+
+<script>
+
+$(".switch").on("click",function() {
+  $($(this).closest("tr").find(".result_map")[0]).toggle()
+})
+
+</script>  
+</body>
+</html>
