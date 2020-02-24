@@ -214,24 +214,35 @@ def smart_retrieve(ese_table, ese_record_num, column_number):
         col_data = 0 if not col_data else struct.unpack('q',col_data)[0]
     return col_data
 
+def ole_timestamp(binblob):
+    """converts a hex encoded OLE time stamp to a time string"""
+    try:
+        td,ts = str(struct.unpack("<d",binblob)[0]).split(".")
+        dt = datetime.datetime(1899,12,30,0,0,0) + datetime.timedelta(days=int(td),seconds=86400 * float("0.{}".format(ts)))
+    except:
+        dt = "This field is incorrectly identified as an OLE timestamp in the template."
+    return dt
+
 def file_timestamp(binblob):
     """converts a hex encoded windows file time stamp to a time string"""
+    import pdb;pdb.set_trace()
     try:
         dt = datetime.datetime(1601,1,1,0,0,0) + datetime.timedelta(microseconds=binblob/10)
     except:
         dt = "This field is incorrectly identified as a file timestamp in the template"
     return dt
 
-def process_srum(srum, software):
+
+def process_srum(srum, software, tablename = '{DD6636C4-8929-4683-974E-22C046A43763}'):
     #This method must commit pin locations to the database
     #Do the wireless Data sheet
-    print("Enumerating Wireless Profiles in the Registry...")
+    print(f"\nProcessing SRUM events in table {tablename}", end="")
     row_num = 1 #Init to 1, first row will be 2 in spreadsheet (1 is headers)
     entries = []
     ese_db = pyesedb.file()
     ese_db.open(srum)
     lookups = load_interfaces(software)
-    ese_table = ese_db.get_table_by_name('{DD6636C4-8929-4683-974E-22C046A43763}')
+    ese_table = ese_db.get_table_by_name(tablename)
     #If the table is not found it returns None
     if not ese_table:
         print("Unable to find network connections table in SRUM file provided")
@@ -242,15 +253,15 @@ def process_srum(srum, software):
         count += 1
         #"L2ProfileId=6, connectstart = 8"
         profile = smart_retrieve(ese_table, ese_row_num, reverse_column_lookup['L2ProfileId'] )
-        connected = smart_retrieve(ese_table, ese_row_num, reverse_column_lookup['ConnectStartTime'] )
-        cdate = file_timestamp(connected)
+        connected = smart_retrieve(ese_table, ese_row_num, reverse_column_lookup['TimeStamp'] )
         if count%10==0:
             sys.stdout.write(".")
             #sys.stdout.flush()
         if profile:
             bssid,ssid = lookups.get(str(profile),(None,'the profile could not be resolved'))
             if bssid:
-                entries.append((cdate,bssid, ssid))
+                entries.append((connected,bssid, ssid))
+    print("\n")
     return entries
 
 

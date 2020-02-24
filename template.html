@@ -5,9 +5,15 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/css/materialize.min.css">
     <script src="https://unpkg.com/material-components-web@v4.0.0/dist/material-components-web.min.js"></script>
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+    <link rel="stylesheet" href="http://unpkg.com/leaflet@1.4.0/dist/leaflet.css" />
+    <script src="http://unpkg.com/leaflet@1.4.0/dist/leaflet.js"></script>
+    <script src="http://unpkg.com/leaflet-kml@1.0.1/L.KML.js"></script>
 </head>
 
 <body>
+
+  <div style="width: 100vw; height: 85vh" id="map"></div>
+
   <div class="container">
     
     <table>
@@ -16,7 +22,7 @@
           <th>Date/Time</th>
           <th>Source</th>
           <th>Coordinate</th>
-          <th>Map</th>
+          <th>Map Link</th>
         </tr>
       </thead>
       <tbody>
@@ -28,11 +34,26 @@
 <script src="https://code.jquery.com/jquery-3.4.1.min.js" integrity="sha256-CSXorXvZcTkaix6Yvo6HppcZGetbYMGWSFlBw8HfCJo=" crossorigin="anonymous"></script>
 
 <script>
-
 $(".switch").on("click",function() {
   $($(this).closest("tr").find(".result_map")[0]).toggle()
 })
+</script>
 
-</script>  
+<script type="text/javascript">
+  // Make basemap
+  const map = new L.Map('map', { center: new L.LatLng(58.4, 43.0), zoom: 11 });
+  const osm = new L.TileLayer('http://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png');
+
+  map.addLayer(osm);
+
+  const parser = new DOMParser();
+  const kml = parser.parseFromString(`!!!KML!!!`, 'text/xml');
+  const track = new L.KML(kml);
+  map.addLayer(track);
+
+  const bounds = track.getBounds();
+  map.fitBounds(bounds);
+</script>
+
 </body>
 </html>

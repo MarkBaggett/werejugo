@@ -11,6 +11,7 @@ import pickle
 import pyesedb
 import config
 import webbrowser
+import simplekml
 
 
 class LocationItem:
@@ -140,7 +141,7 @@ class EventList(UserList):
             ssids = [ssid for mac,sig,chan,ssid in access_points]
             lat,long,accuracy = resolver.google_networks_to_location(location_data)
             note = ",".join(list(set([x.decode() for x in ssids])))
-            newlocation = LocationItem(lat,long,accuracy, "Google Network Triangulation", f"{note}")
+            newlocation = LocationItem(lat,long,accuracy, f"Google Network Triangulation", f"{note}")
             if not newlocation in self.Locations.data:
                 self.Locations.append(newlocation)
             for ssid in ssids:
@@ -153,7 +154,7 @@ class EventList(UserList):
                     mac = mac.replace("-",":")
                 if not mac in self.Locations.ap_bssids:
                     self.Locations.ap_bssids[mac].append(newlocation)
-            self.data.append(Event(constart, newlocation, "Windows Diagnostice Event 6100"))
+            self.data.append(Event(constart, newlocation, f"Windows Diagnostice Event 6100 {note}"))
         return
 
     def load_wlan_autoconfig(self, path_to_reg = ".\sof1", path_to_evtx = 'c:\windows\System32\winevt\Logs\Microsoft-Windows-WLAN-AutoConfig%4Operational.evtx'):
@@ -198,26 +199,55 @@ class EventList(UserList):
         return
 
     def load_srum_wifi(self,srum_path, software_hive):
-        srum_events = resolver.process_srum(srum_path, software_hive)
+        srum_events = resolver.process_srum(srum_path, software_hive, '{DD6636C4-8929-4683-974E-22C046A43763}')
         for tstamp, bssid, ssid in srum_events:
             if ssid in self.Locations.ap_ssids:
                 location = self.Locations.best_ssid_location(ssid)
             elif bssid in self.Locations.ap_bssids:
                 location = self.Locations.best_bssid_location(bssid)
             if location:
-                self.data.append(Event(tstamp, location, f"SRUM-Application-Activity {ssid} {bssid}"))
+                self.data.append(Event(tstamp, location, f"SRUM-Network-Connections {ssid} {bssid}"))
+        srum_events = resolver.process_srum(srum_path, software_hive, '{973F5D5C-1D90-4944-BE8E-24B94231A174}')
+        for tstamp, bssid, ssid in srum_events:
+            if ssid in self.Locations.ap_ssids:
+                location = self.Locations.best_ssid_location(ssid)
+            elif bssid in self.Locations.ap_bssids:
+                location = self.Locations.best_bssid_location(bssid)
+            if location:
+                self.data.append(Event(tstamp, location, f"SRUM-Network-Usage {ssid} {bssid}"))
 
-    def to_html(self,output,template="template.html"):
+    def to_files(self, html_file, kml_file, template="template.html"):
         result = open(template,"rb").read()
+        kml = self.to_kml(kml_file)
         rows= ""
         for event in self.data:
-            rows += f"""<tr class="result_row"><td>{event.timestamp}</td><td>{event.source}</td><td>{event.location.latitude},{event.location.longitude}</td><td><div class="switch"><label>Off<input type="checkbox"><span class="lever"></span>On</label></div></td>"""
+            rows += f"""<tr class="result_row"><td>{event.timestamp}</td><td>{event.source}</td><td>{event.location.latitude},{event.location.longitude}</td>"""
             #rows += f"""<td><iframe class="result_map" width="250" height="200" frameborder="0" src="https://www.bing.com/maps/embed?h250&w=200&cp={event.location.latitude}~{event.location.longitude}&lvl=11&typ=d&sty=r&src=SHELL&FORM=MBEDV8" scrolling="no"></iframe></td>"""
             rows += f"""<td><a href="https://www.google.com/maps/@{event.location.latitude},{event.location.longitude},19z">Show on Google Maps</a></td>"""
             rows += "</tr>"
-        fh = open(output,"wb")
-        fh.write(result.replace(b"!!!DATA!!!", rows.encode()))
+        result = result.replace(b"!!!KML!!!",kml.encode())
+        result = result.replace(b"!!!DATA!!!", rows.encode())
+        fh = open(html_file,"wb")
+        fh.write(result)
         fh.close()
+
+    def to_kml(self, output="results.kml"):
+        print("Creating KML file")
+        kml = simplekml.Kml(name="Wifi Map",description="Visual Wigle Location")
+        events_by_location = defaultdict(lambda :[])
+        for event in self.data:
+            events_by_location[self.Locations.index(event.location)].append(event)
+        for locnum, events in events_by_location.items():
+            lon = events[0].location.longitude
+            lat = events[0].location.latitude
+            first = min([x.timestamp for x in events])
+            last = max([x.timestamp for x in events])
+            name = f"{len(events)} Events between {first} and {last}"
+            pin = kml.newpoint(name= name, coords=[(lon,lat)])
+            pin.description = ",".join([x.location.notes or x.location.source for x in events[:10]])
+        kml.save(output)
+        return kml.kml()
+
 
         
 verified_aps = [(b'F8-2C-18-07-20-19', b'-88', b'1'), (b'A6-04-60-0D-F9-E7', b'-55', b'3'), (b'10-9A-DD-8B-29-1C', b'-79', b'5745000'), (b'A0-04-60-0D-68-AD', b'-67', b'5220000'), (b'A6-04-60-0D-68-AB', b'-53', b'3'), (b'A0-04-60-0D-F9-E9', b'-69', b'5220000'), (b'F8-2C-18-07-20-1B', b'-90', b'1'), (b'9C-3D-CF-73-E0-A8', b'-61', b'8'), (b'AA-04-60-0D-68-AB', b'-54', b'3')]
@@ -234,13 +264,12 @@ verified_aps = [(b'F8-2C-18-07-20-19', b'-88', b'1'), (b'A6-04-60-0D-F9-E7', b'-
 # AA-04-60-0D-68-AB	Infra	 <unknown>	-54		3	 (Unnamed Network)
 
 if __name__ == "__main__":
-    config = config.config("werejugo.yaml")
-    resolver.config = config
+    config = config.config("werejugo2.yaml")
     mylocations = LocationList()
     myevents = EventList(mylocations)
 
-    #if pathlib.Path("locations.cache").exists() and input("A cache of locations was found from a previous run of this tool. Would you like to reload that information?").lower().startswith("y"):
-    #    myevents.Locations.load("locations.cache")
+    if pathlib.Path("locations.cache").exists() and input("A cache of locations was found from a previous run of this tool. Would you like to reload that information?").lower().startswith("y"):
+        myevents.Locations.load("locations.cache")
 
     print("Discovering networks via wifi diagnostic logs...")
     myevents.load_wifi_diagnostics(".\sys.evtx")
@@ -258,7 +287,7 @@ if __name__ == "__main__":
     myevents.load_srum_wifi(".\sr1.dat", ".\sof1")
     myevents.load_wlan_autoconfig(".\sof1", ".\wlan.evtx")
     myevents.load_reg_history(".\sof1")
-    myevents.to_html("results.html")
+    myevents.to_files("results.html", "result.kml")
     webbrowser.open("results.html")
     print("EVENTS: \n", myevents)
     #print("LOCATIONS \n",myevents.Locations)
