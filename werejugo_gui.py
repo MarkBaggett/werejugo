@@ -92,9 +92,9 @@ while True:
     if event == "Auto Acquire Files":
         result = extract_live_file()
         if result:
-            window.Element("_SYSTEMEVENTS_").Update(result[0])
+            window.Element("_SYSTEMEVENTS_").Update(result[2])
             window.Element("_SRU_").Update(result[1])
-            window.Element("_SOFTWARE_").Update(result[2])
+            window.Element("_SOFTWARE_").Update(result[0])
             window.Element("_WLANEVENTS_").Update(result[3])
         continue
 
