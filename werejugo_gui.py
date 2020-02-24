@@ -51,7 +51,7 @@ def extract_live_file():
         soft = extract_file(r"\windows\system32\config\SOFTWARE", extracted_soft)
         srum = extract_file(r"\windows\system32\sru\srudb.dat", extracted_srum)
         sys  = extract_file(r"\windows\system32\Winevt\Logs\System.evtx", extracted_sys)
-        wlan = extract_file(r"\windows\system32\Winevts\Logs\Microsoft-Windows-WLAN-AutoConfig%4Operational.evtx", extracted_wlan)
+        wlan = extract_file(r"\windows\system32\Winevt\Logs\Microsoft-Windows-WLAN-AutoConfig%4Operational.evtx", extracted_wlan)
         #wlan= "blah"
     except Exception as e:
         print(f"Error occured {str(e)}")
