@@ -290,6 +290,8 @@ def wigle_search(bssid, wigle_user = None, wigle_pass = None):
         print("{} There was an error from Wigle. {}".format("*"*25, webresp.reason))
         return None
     wigle_data = webresp.json()
+    if wigle_data.get("success") == "False":
+        print(wigle_data.get("message"))
     if wigle_data.get("totalResults", 0):
         lat = wigle_data.get("results")[0].get("trilat")
         long = wigle_data.get("results")[0].get("trilong")

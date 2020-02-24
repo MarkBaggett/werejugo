@@ -143,6 +143,7 @@ print("Discovering networks via wifi diagnostic logs...")
 myevents.load_wifi_diagnostics(sys_path)
 
 if input(f"\n{len(mylocations)} locations discovered.  Would you like to discover more locations by performing Wigle lookups of known Wireless (PNL)?").lower().startswith("y"):
+    import pdb;pdb.set_trace()
     mylocations.load_registry_wigle(soft_path)
 if input(f"\n{len(mylocations)} locations discovered.  Would you like to discover more locations by performing an exaustive (very slow) location search? ").lower().startswith("y"):
     mylocations.load_registry_triangulations(soft_path)
