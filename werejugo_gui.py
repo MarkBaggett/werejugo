@@ -59,18 +59,18 @@ def extract_live_file():
     return soft,srum,sys,wlan
         
 
-layout = [[sg.Text('Required: Path to System Events c:\windows\system32\Winevt\Logs\System.evtx')],
-[sg.Input(key="_SYSTEMEVENTS_", enable_events=True), sg.FileBrowse(target="_SYSTEMEVENTS_")], 
-[sg.Text('Required: SOFTWARE registry file c:\windows\system32\config\SOFTWARE')],
-[sg.Input(key="_SOFTWARE_"), sg.FileBrowse(target="_SOFTWARE_")],
+layout = [[sg.Text('Required: SOFTWARE registry file c:\windows\system32\config\SOFTWARE')],
+[sg.Checkbox('', key='_SOFTCHK_', size=(1,1),default=True,disabled=True), sg.Input(key="_SOFTWARE_"), sg.FileBrowse(target="_SOFTWARE_")],
+[sg.Text('Required: Path to System Events c:\windows\system32\Winevt\Logs\System.evtx')],
+[sg.Checkbox('', key='_SYSCHK_', size=(1,1),default=True), sg.Input(key="_SYSTEMEVENTS_", enable_events=True), sg.FileBrowse(target="_SYSTEMEVENTS_")], 
 [sg.Text('Required: WLAN Event Logs c:\windows\system32\Winevt\Logs\Microsoft-Windows-WLAN-AutoConfig perational.evtx')],
-[sg.Input(key="_WLANEVENTS_"), sg.FileBrowse(target="_WLANEVENTS_")],
+[sg.Checkbox('', key='_WLANCHK_', size=(1,1),default=True),sg.Input(key="_WLANEVENTS_"), sg.FileBrowse(target="_WLANEVENTS_")],
 [sg.Text('Required: SRUDB.DAT c:\windows\system32\sru\srudb.dat')],
-[sg.Input(key="_SRU_"), sg.FileBrowse(target="_SRU_")],
+[sg.Checkbox('', key='_SRUCHK_', size=(1,1),default=True), sg.Input(key="_SRU_"), sg.FileBrowse(target="_SRU_")],
 [sg.Text('REQUIRED: Configuration file with API keys. .\werejugo.yaml')],
-[sg.Input(config_path,key='_APIKEYS_'), sg.FileBrowse(target='_APIKEYS_')],
+[sg.Checkbox('', size=(1,1),default=True,disabled=True), sg.Input(config_path,key='_APIKEYS_'), sg.FileBrowse(target='_APIKEYS_')],
 [sg.Text('REQUIRED: Output folder for results.')],
-[sg.Input(os.getcwd(),key='_OUTDIR_'), sg.FolderBrowse(target='_OUTDIR_')],
+[sg.Checkbox('', size=(1,1),default=True,disabled=True), sg.Input(os.getcwd(),key='_OUTDIR_'), sg.FolderBrowse(target='_OUTDIR_')],
 [sg.Text("Click here for support via Twitter @MarkBaggett",enable_events=True, key="_SUPPORT_", text_color="Blue")],
 [sg.OK(), sg.Cancel()]] 
 
@@ -84,7 +84,7 @@ window = sg.Window('werejugo 0.1', layout)
 while True:             
     event, values = window.Read()
     if event is None:
-        break
+        sys.exit()
     if event == "_SUPPORT_":
         webbrowser.open("https://twitter.com/MarkBaggett")
     if event == 'Cancel':
@@ -96,11 +96,18 @@ while True:
             window.Element("_SRU_").Update(result[1])
             window.Element("_SOFTWARE_").Update(result[0])
             window.Element("_WLANEVENTS_").Update(result[3])
+            window.Element("_SYSCHK_").Update(value=True)
+            window.Element("_SRUCHK_").Update(value=True)
+            window.Element("_WLANCHK_").Update(value=True)
         continue
+
+    process_wlan = values.get('_WLANCHK_')
+    process_sru = values.get('_SRUCHK_') 
+    process_sys = values.get('_SYSCHK_')
 
     if event == 'OK':
         sys_path = pathlib.Path(values.get("_SYSTEMEVENTS_"))
-        if not sys_path.exists() or not sys_path.is_file() or str(sys_path).lower().startswith("c:\windows\system32"):
+        if process_sys and (not sys_path.exists() or not sys_path.is_file() or str(sys_path).lower().startswith("c:\windows\system32")):
             sg.PopupOK("System Event log not found or locked by OS.")
             continue
         soft_path = pathlib.Path(values.get("_SOFTWARE_"))
@@ -108,11 +115,11 @@ while True:
             sg.PopupOK("SOFTWARE registry file is not found or locked by OS.")
             continue
         wlan_path = pathlib.Path(values.get("_WLANEVENTS_"))
-        if not wlan_path.exists() or not wlan_path.is_file() or str(wlan_path).lower().startswith("c:\windows\system32"):
+        if process_wlan and (not wlan_path.exists() or not wlan_path.is_file() or str(wlan_path).lower().startswith("c:\windows\system32")):
             sg.PopupOK("WLAN Event Log is not found or locked by OS.")
             continue
         sru_path = pathlib.Path(values.get("_SRU_"))
-        if not sru_path.exists() or not sru_path.is_file() or str(sru_path).lower().startswith("c:\windows\system32"):
+        if process_sru and (not sru_path.exists() or not sru_path.is_file() or str(sru_path).lower().startswith("c:\windows\system32")):
             sg.PopupOK("SRUM database is not found or locked by OS.")
             continue
         config_path = pathlib.Path(values.get("_APIKEYS_"))
@@ -139,22 +146,33 @@ myevents = EventList(mylocations)
 if pathlib.Path("locations.cache").exists() and input("A cache of locations was found from a previous run of this tool. Would you like to reload that information?").lower().startswith("y"):
     myevents.Locations.load("locations.cache")
 
-print("Discovering networks via wifi diagnostic logs...")
-myevents.load_wifi_diagnostics(sys_path)
+print("Discovering locations history... Please be patient")
+mylocations.load_registry_wigle(soft_path)
 
-if input(f"\n{len(mylocations)} locations discovered.  Would you like to discover more locations by performing Wigle lookups of known Wireless (PNL)?").lower().startswith("y"):
-    import pdb;pdb.set_trace()
-    mylocations.load_registry_wigle(soft_path)
+if process_sys:
+    print("Discovering networks via wifi diagnostic logs...")
+    myevents.load_wifi_diagnostics(sys_path)
+
 if input(f"\n{len(mylocations)} locations discovered.  Would you like to discover more locations by performing an exaustive (very slow) location search? ").lower().startswith("y"):
     mylocations.load_registry_triangulations(soft_path)
 
 #myevents.Locations.save("locations.cache")
 
-print(f"Working with {len(mylocations)} locations")
 
 #Begin Loading Events
-myevents.load_srum_wifi(sru_path, soft_path)
-myevents.load_wlan_autoconfig(soft_path, wlan_path)
+
+print(f"Finding Events for {len(mylocations)} locations")
 myevents.load_reg_history(soft_path)
-myevents.to_files(out_path / "results.html", out_path / "result.kml", program_dir / "template.html")
-webbrowser.open(out_path / "results.html")
+
+if process_sru:
+    myevents.load_srum_wifi(sru_path, soft_path)
+if process_wlan:
+    myevents.load_wlan_autoconfig(soft_path, wlan_path)
+
+
+if len(myevents) > 0:
+    print("Generating Output")
+    myevents.to_files(out_path / "results.html", out_path / "result.kml", program_dir / "template.html")
+    webbrowser.open(out_path / "results.html")
+else:
+    print("No Location Events found.")
