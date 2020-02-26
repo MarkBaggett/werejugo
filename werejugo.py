@@ -1,382 +1,181 @@
-from Registry import Registry
-import requests
-import json
-import struct
-import openpyxl
-import glob
-import sys
 import argparse
-import datetime
-import re
-import lxml.etree
-import Evtx.Evtx
-import Evtx.Views
-import Evtx.Nodes
+import PySimpleGUI as sg
+import itertools
 import os
-import simplekml
+import pathlib
+import ctypes
+import config
+from core import LocationItem, LocationList, Event, EventList
+import webbrowser
+import resolver
+import sys
+import tempfile
+import subprocess
 
-try:
-    input=raw_input
-except:
-    pass
 
-def xml_records(filename):
-    #Code based on https://raw.githubusercontent.com/williballenthin/python-evtx/master/scripts/evtx_filter_records
-    """
-    If the second return value is not None, then it is an
-      Exception encountered during parsing.  The first return value
-      will be the XML string.
 
-    @type filename str
-    @rtype: generator of (etree.Element or str), (None or Exception)
-    """
-    with Evtx.Evtx.Evtx(filename) as evtx:
-        for xml, record in Evtx.Views.evtx_file_xml_view(evtx.get_file_header()):
-            try:
-                yield lxml.etree.fromstring(b"<?xml version=\"1.0\" standalone=\"yes\" ?>%s" % xml), None
-            except lxml.etree.XMLSyntaxError as e:
-                yield xml, e
+if getattr(sys, 'frozen', False):
+    program_dir = pathlib.Path(sys.executable)  
+elif __file__:
+    program_dir = pathlib.Path(__file__)
 
-def get_child(node, tag, ns="{http://schemas.microsoft.com/win/2004/08/events/event}"):
-    #Code based on https://raw.githubusercontent.com/williballenthin/python-evtx/master/scripts/evtx_filter_records
-    """
-    @type node: etree.Element
-    @type tag: str
-    @type ns: str
-    """
-    return node.find("%s%s" % (ns, tag))
+program_dir = program_dir.resolve().parent
+config_path = "Path to werejugo.yaml"
+if (program_dir / "werejugo.yaml").exists():
+    config_path = str(program_dir / "werejugo.yaml")
 
-def google_cheat(networks):
-    #cheats using a google api key by looking up the data directly with the browser location service
-    url = 'https://maps.googleapis.com/maps/api/browserlocation/json?browser=firefox&sensor=true'
-    for eachnetwork in networks:
-        url += '&wifi=mac:{0}|ssid:{2}|ss:{1}'.format(*eachnetwork)
-    webresp = requests.get(url)
-    if webresp.status_code == 200:
-        x = webresp.json()
-    else:
-        print("URL: {0}".format(url))
-        print(webresp.status_code, webresp.reason, webresp.content)
-        return("Not Found", "Not Found")
-    accuracy =  "Accuracy of %s square meters" % (x['accuracy'])
-    geourl =  "http://maps.google.com/maps?q=%.9f,%.9f&z=15" % (x['location']['lat'], x['location']['lng'])
-    return (accuracy, geourl)
 
-def parse_6100(path_to_evtx):
-    results = []
-    for node, err in xml_records(path_to_evtx):
-        if err is not None:
-            continue
-        EventMetadata = get_child(node, "System")
-        EventData = get_child(node, "EventData")
-        if 6100 == int(get_child(EventMetadata, "EventID").text):
-            SystemTime = get_child(EventMetadata, "TimeCreated").attrib
-            #import pdb;pdb.set_trace()
-            EventDescription = "".join([x.text for x in EventData])
-            sids = re.findall(r"(\w\w-\w\w-\w\w-\w\w-\w\w-\w\w).*?Infra.*?&lt;\s+(-\d{1,3})\s+\d{1,8}\s+([()\w]+)",EventDescription)
-            if not sids:
-                continue
-            accuracy,url = google_cheat(sids)
-            results.append((str(SystemTime), EventDescription, accuracy, url))
-    return results
+esentutl_path = pathlib.Path(os.environ.get("COMSPEC")).parent / "esentutl.exe"
+if not esentutl_path.exists():
+    print("ESENTUTL Not found. Automatic extraction is not available.")
 
-def parse_wlan_autoconfig(path_to_evtx):
-    results = []
-    Connect_Events = [8001 ] 
-    Disconnect_Events = [8003] 
-    Failed_Events = [8002, 11002]
-    Still_Connected  = [11004, 11005, 11010, 11006, 12011, 12012, 12013]
-    for node, err in xml_records(path_to_evtx):
-        if err is not None:
-            continue
-        EventMetadata = get_child(node, "System")
-        EventData = get_child(node, "EventData")
-        SystemTime = get_child(EventMetadata, "TimeCreated").attrib
-        EventDescription = "\n".join(["{0}:{1}".format(x.values()[0],str(x.text)) for x in EventData])
-        EventID = int(get_child(EventMetadata, "EventID").text)
-        if EventID in Connect_Events:
-            eventtype = "Connect"
-        elif EventID in Disconnect_Events:
-            eventtype = "Disconnect"
-        elif EventID in Failed_Events:
-            eventtype = "Failed Connection"
-        else:
-            continue
-        ProfileName = re.search(r"SSID:(\S+)", EventDescription).group(1)
-        BSSID = profile_table.get(ProfileName, "MAC-UNKNOWN")
-        mapurl = "Unable to determine MAC for SSID"
-        if BSSID != "MAC-UNKNOWN":
-            mapurl = "Unable to find MAC on Wigle"
-            result = wigle_search(netid=BSSID)
-            if len(result['results']):
-                for eachresult in result['results']:
-                    mapurl =  "http://maps.google.com/maps?q=%.9f,%.9f&z=15" % (eachresult['trilat'], eachresult['trilong'])
-        results.append((eventtype, BSSID, ProfileName, SystemTime['SystemTime'], mapurl ))
-    return results
 
-def get_reg_value(path_to_file, path, key):
-    rh = Registry.Registry(path_to_file)
-    rk = rh.open(path)
-    return rk.value(key).value()
+def extract_live_file():
 
-wigle_cache={}
-def wigle_search(**kwargs):
-    #Lookup like this  wigle_search(netid="ff:ff:ff:ff:ff")
-    if kwargs['netid'] in wigle_cache:
-        print("Retrieving " + kwargs['netid'] + " from Cache")
-        return wigle_cache.get(kwargs['netid'])
-    url = "https://api.wigle.net/api/v2/network/search"
-    if not options.WIGLE_USER or not options.WIGLE_PASS:
-            return {'results':[{'trilat':0, 'trilong': 0}]}
+    def extract_file(src,dst, ese = esentutl_path):
+        cmdline = rf"{str(ese)} /y {str(src)} /vss /d {str(dst)}"
+        print(cmdline)
+        phandle = subprocess.Popen(cmdline, shell=True,stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        out1,_ = phandle.communicate()
+        if (b"returned error" in out1) or (b"Init failed" in out1):
+            print("ERROR\n File Extraction: {}\n".format(out1.decode()))
+            return "Error Extracting File"
+        return dst
+        
     try:
-        webresp = requests.get(url, auth = (options.WIGLE_USER,options.WIGLE_PASS), params = kwargs)
-        if webresp.status_code != 200:
-            print("*"*25,"There was an error from Wigle. {0}".format(webresp.reason))
-        result = webresp.json()
-        wigle_cache[kwargs['netid']] = result
-        if result['success']==False:
-            raise(Exception("*"*25, "Wigle Request Failed {0}".format(result['message'])))
+        tmp_dir = tempfile.mkdtemp()
+        extracted_soft = pathlib.Path(tmp_dir) / "SOFTWARE"
+        extracted_srum = pathlib.Path(tmp_dir) / "srudb.dat"
+        extracted_sys = pathlib.Path(tmp_dir) / "system.evtx"
+        extracted_wlan = pathlib.Path(tmp_dir) / "wlan.evtx"
+        soft = extract_file(r"\windows\system32\config\SOFTWARE", extracted_soft)
+        srum = extract_file(r"\windows\system32\sru\srudb.dat", extracted_srum)
+        sys  = extract_file(r"\windows\system32\Winevt\Logs\System.evtx", extracted_sys)
+        wlan = extract_file(r"\windows\system32\Winevt\Logs\Microsoft-Windows-WLAN-AutoConfig%4Operational.evtx", extracted_wlan)
+        #wlan= "blah"
     except Exception as e:
-        cont = input("Bad things happened while talking to Wigle. {0}, {1}  Continue? [Y/N] ".format(webresp.reason, str(e)))
-        if cont.lower()=="n":
-            raise(Exception("Wigle connection error. {0} {1} {2}".format(webresp.status_code,webresp.reason,str(e))))
-    return result
+        print(f"Error occured {str(e)}")
 
-def reg_date(dateblob):
-    weekday = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
-    year,month,day,date,hour,minute,sec,micro = struct.unpack('<8H', dateblob)
-    dt = "%s, %02d/%02d/%04d %02d:%02d:%02d.%s" % (weekday[day],month,date,year,hour,minute,sec,micro)
-    dtp = datetime.datetime.strptime(dt,"%A, %m/%d/%Y %H:%M:%S.%f")
-    return dtp
+    return soft,srum,sys,wlan
+        
 
-def get_profile_info(reg_handle, ProfileGuid):
-    nametypes = {'47':"Wireless", "06":"Wired", "17":"Broadband"}
-    guid = b"Microsoft\Windows NT\CurrentVersion\NetworkList\Profiles\%s" % (ProfileGuid)
-    regkey = reg_handle.open(guid)
-    NameType ="%02x"  % regkey.value("NameType").value()
-    nettype = nametypes.get(str(NameType), "Unknown Type"+str(NameType))
-    FirstConnect = reg_date(regkey.value("DateCreated").value())
-    LastConnect  = reg_date(regkey.value("DateLastConnected").value())
-    return nettype, FirstConnect, LastConnect
+layout = [[sg.Text('Required: SOFTWARE registry file c:\windows\system32\config\SOFTWARE')],
+[sg.Checkbox('', key='_SOFTCHK_', size=(1,1),default=True,disabled=True), sg.Input(key="_SOFTWARE_"), sg.FileBrowse(target="_SOFTWARE_")],
+[sg.Text('Required: Path to System Events c:\windows\system32\Winevt\Logs\System.evtx')],
+[sg.Checkbox('', key='_SYSCHK_', size=(1,1),default=True), sg.Input(key="_SYSTEMEVENTS_", enable_events=True), sg.FileBrowse(target="_SYSTEMEVENTS_")], 
+[sg.Text('Required: WLAN Event Logs c:\windows\system32\Winevt\Logs\Microsoft-Windows-WLAN-AutoConfig perational.evtx')],
+[sg.Checkbox('', key='_WLANCHK_', size=(1,1),default=True),sg.Input(key="_WLANEVENTS_"), sg.FileBrowse(target="_WLANEVENTS_")],
+[sg.Text('Required: SRUDB.DAT c:\windows\system32\sru\srudb.dat')],
+[sg.Checkbox('', key='_SRUCHK_', size=(1,1),default=True), sg.Input(key="_SRU_"), sg.FileBrowse(target="_SRU_")],
+[sg.Text('REQUIRED: Configuration file with API keys. .\werejugo.yaml')],
+[sg.Checkbox('', size=(1,1),default=True,disabled=True), sg.Input(config_path,key='_APIKEYS_'), sg.FileBrowse(target='_APIKEYS_')],
+[sg.Text('REQUIRED: Output folder for results.')],
+[sg.Checkbox('', size=(1,1),default=True,disabled=True), sg.Input(os.getcwd(),key='_OUTDIR_'), sg.FolderBrowse(target='_OUTDIR_')],
+[sg.Text("Click here for support via Twitter @MarkBaggett",enable_events=True, key="_SUPPORT_", text_color="Blue")],
+[sg.OK(), sg.Cancel()]] 
 
-def network_history(reg_handle):
-    global profile_table
-    reg_results = []
-    for eachsubkey in reg_handle.open(b"Microsoft\Windows NT\CurrentVersion\NetworkList\Signatures\Unmanaged").subkeys():
-        DefaultGatewayMac = eachsubkey.value("DefaultGatewayMac").value()
-        BSSID = ':'.join(DefaultGatewayMac.encode("HEX")[i:i+2] for i in range(0,12,2))
-        Description = eachsubkey.value("Description").value()
-        DnsSuffix = eachsubkey.value("DnsSuffix").value()
-        SSID = eachsubkey.value("FirstNetwork").value()
-        ProfileGuid = eachsubkey.value("ProfileGuid").value()
-        nettype,first,last = get_profile_info(reg_handle, ProfileGuid)
-        mapurl="Not found"
-        #print "TYPE:",nettype, " SSID:",SSID, "Description:", Description, "DNS SUFFIX", DnsSuffix, "MAC ADDRESS:", BSSID
-        if nettype=="Wireless":
-            result = wigle_search(netid=BSSID)
-            if len(result['results']):
-                for eachresult in result['results']:
-                    #print "Found: ", SSID, BSSID
-                    #print "First connected: ",first
-                    #print "Last Connected : ",last  
-                    mapurl =  "http://maps.google.com/maps?q=%.9f,%.9f&z=15" % (eachresult['trilat'], eachresult['trilong'])
-            #print google_cheat(BSSID, SSID)
-            profile_table[SSID] = BSSID
-        reg_results.append((BSSID,SSID,Description,DnsSuffix,nettype,first,last,mapurl))
-    return reg_results
-
-def reg_basic_info():
-    #Retreive basic computer data
-    print("Enumerating Basic Computer Data")
-    osversion = get_reg_value("SOFTWARE", "Microsoft\Windows NT\CurrentVersion", "CurrentVersion")
-    which_control_set = get_reg_value("SYSTEM","Select","Current")
-    ControlSet = "ControlSet%03d" % (which_control_set)
-    comp_name = get_reg_value("SYSTEM",ControlSet+"\Control\ComputerName\ComputerName","ComputerName")
-    time_zone = get_reg_value("SYSTEM",ControlSet+"\Control\TimeZoneInformation","DayLightName")
-    print(osversion, which_control_set, comp_name, time_zone)
-
-def reg_interface_info():
-    #Retrieve local area network connections
-    print("Enumerating Local Network Interface Data")
-    rh = Registry.Registry("SYSTEM")
-    interfaces = rh.open(ControlSet+"\Services\Tcpip\Parameters\Interfaces").subkeys()
-    for eachinterface in interfaces:
-        try:
-            print(eachinterface.value("DhcpIPAddress").value())
-            print(eachinterface.value("DhcpDomain").value())
-        except:
-            pass
-
-parser = argparse.ArgumentParser(description="Given a directory of SOFTWARE registry hives it will enumerate all the wireless.")
-parser.add_argument("--IMAGE_MOUNT_POINT","-i",default='', help ="Geolocate all sources searching the SYSTEM volume of this mounted Windows Images . example: z:\image\C:")
-#parser.add_argument("--recurse", help = "Recursively, Exhaustively search the entire drive for any usable file instead of looking in default locatoins.", action="store_true", )
-parser.add_argument("--SOFTWARE_REGISTRY","-r", default="", help ="Location of the SOFTWARE registry keys. (Supports Wildcards) example: c:\windows\system32\config\SYSTEM*")
-parser.add_argument("--SYSTEM_EVENTS","-e", default="", help ="Location of System Event Log specified. (Support Wildcards) Example: c:\windows\system32\Winevt\Logs\System.evtx)")
-parser.add_argument("--WLAN_EVENTS","-w", default="", help ="Location of WLAN Autoconfig Event Log specified. (Support Wildcards) Example: c:\windows\system32\Winevt\Logs\Microsoft-Windows-WLAN-AutoConfig perational.evtx)")
-parser.add_argument("--OUTPUT","-o", default="werejugo_output.xlsx", help ="Path and filename of the XLSX file to create.")
-parser.add_argument("--WIGLE_USER", "-u", help="Wigle.net API Username.  Required for geolocating  See https://wigle.net/account")
-parser.add_argument("--WIGLE_PASS", "-p", help="Wigle.net API Password.  Required for geolocating  See https://wigle.net/account")
-parser.add_argument("--KML", "-k", action="store_true", help="Outputs KML file based on Wigle results. Geolocation required.")
-
-options = parser.parse_args()
-
-#if options.recurse:
-#    print("Exhaustive search not implemented yet.")
-
-reg_files = os.path.join(options.IMAGE_MOUNT_POINT,options.SOFTWARE_REGISTRY) 
-evt_files = os.path.join(options.IMAGE_MOUNT_POINT,options.SYSTEM_EVENTS)
-wlan_evts_files = os.path.join(options.IMAGE_MOUNT_POINT,options.WLAN_EVENTS)
-if "*" in reg_files:
-    reg_files = glob.glob(reg_files)
+if ctypes.windll.shell32.IsUserAnAdmin() == 1:
+    layout[-1].append(sg.Button("Auto Acquire Files"))
 else:
-    reg_files = [reg_files]
-if "*" in evt_files:
-    evt_files = glob.glob(evt_files)
-else:
-    evt_files = [evt_files]
-if "*" in wlan_evts_files:
-    wlan_evts_files = glob.glob(wlan_evts_files)
-else:
-    wlan_evts_files = [wlan_evts_files]
+    sg.PopupOK('Run this tool with Admin priviliges to acquire files from this system.')
+    
+# Create the Window
+window = sg.Window('werejugo 0.1', layout)
+while True:             
+    event, values = window.Read()
+    if event is None:
+        sys.exit()
+    if event == "_SUPPORT_":
+        webbrowser.open("https://twitter.com/MarkBaggett")
+    if event == 'Cancel':
+        sys.exit(0)
+    if event == "Auto Acquire Files":
+        result = extract_live_file()
+        if result:
+            window.Element("_SYSTEMEVENTS_").Update(result[2])
+            window.Element("_SRU_").Update(result[1])
+            window.Element("_SOFTWARE_").Update(result[0])
+            window.Element("_WLANEVENTS_").Update(result[3])
+            window.Element("_SYSCHK_").Update(value=True)
+            window.Element("_SRUCHK_").Update(value=True)
+            window.Element("_WLANCHK_").Update(value=True)
+        continue
 
+    process_wlan = values.get('_WLANCHK_')
+    process_sru = values.get('_SRUCHK_') 
+    process_sys = values.get('_SYSCHK_')
 
-if not options.WIGLE_USER or not options.WIGLE_PASS:
-        print("\nA Wigle API username and password is required for geolocation resolution.  Obtain one https://wigle.net/account.")
-        print("All Locations will be 0,0.\n\n")
-
-#Retrieve Wifi history
-print("Enumerating Wireless History and GPS Locations")
-target_wb = openpyxl.Workbook()
-
-#Create a Consolidated Timeline tab in the spreadsheet
-timeline_sheet = target_wb.create_sheet(title="Consolidated Timeline")
-columns = ['Date','BSSID', 'SSID','Geolocation URL']
-for column, value in enumerate(columns):
-    timeline_sheet.cell(row = 1, column = column+1).value = value
-
-
-#Do the wireless Data sheet
-unmanaged_cache = []
-managed_cache = []
-if options.SOFTWARE_REGISTRY:
-    print("Enumerating Wireless Profiles in the Registry...")
-    xls_sheet = target_wb.create_sheet(title="Wireless Data")
-    columns = ['BSSID', 'SSID','Description', 'DNSSufix', 'Type', 'First Seen', 'Last Seen', 'Geolocation URL']
-    profile_table = {}
-    for column, value in enumerate(columns):
-        xls_sheet.cell(row = 1, column = column+1).value = value
-    for eachfile in reg_files:
-        try:
-            reg_handle = Registry.Registry(eachfile)
-            reg_handle.open(b"Microsoft\Windows NT\CurrentVersion\NetworkList\Signatures\Unmanaged")
-        except Exception as e:
-            print("Unable to process file {0} : {1} ".format(eachfile,e))
-        else:
-            reg_data = network_history(reg_handle)
-            unmanaged_cache = reg_data
-            for row, row_data in enumerate(reg_data):
-                for column, value in enumerate(row_data):
-                    xls_sheet.cell(row = row+2, column = column+1).value = value
-                if row_data[7].startswith("http"):
-                    timeline_sheet.append([row_data[5], row_data[0], row_data[1],row_data[7]])
-                    timeline_sheet.append([row_data[6], row_data[0], row_data[1],row_data[7]])
-        try:
-            reg_handle = Registry.Registry(eachfile)
-            reg_handle.open(b"Microsoft\Windows NT\CurrentVersion\NetworkList\Signatures\Managed")
-        except Exception as e:
-            print("Unable to process file {0} : {1} ".format(eachfile,e))
-        else:
-            reg_data = network_history(reg_handle)
-            managed_cache = reg_data
-            profile_table[reg_data[1]] = reg_data[0]
-            for row, row_data in enumerate(reg_data):
-                for column, value in enumerate(row_data):
-                    xls_sheet.cell(row = row+2, column = column+1).value = value
-                if row_data[7].startswith("http"):
-                    timeline_sheet.append([row_data[5], row_data[0], row_data[1],row_data[7]])
-                    timeline_sheet.append([row_data[6], row_data[0], row_data[1],row_data[7]])
-
-
-#Do the Event 6100 sheet
-if options.SYSTEM_EVENTS:
-    print("Enumerating Event 6100 data from SYSTEM event logs...")
-    print("Google disabled the required API.  This feature is temporarily unavailable.")
-    """xls_sheet = target_wb.create_sheet(title="Event 6100 Data")
-    columns = ['System Time', 'Data','Geolocation Accuracy', 'Geolocation URL']
-    for column, value in enumerate(columns):
-        xls_sheet.cell(row = 1, column = column+1).value = value
-    for eachfile in evt_files:
-        #try:
-        evt_data  = parse_6100(eachfile)
-        #except Exception as e:
-        #    print("Unable to process file {0} : {1} ".format(eachfile,e))
-        #    continue
-        for row, row_data in enumerate(evt_data):
-            for column, value in enumerate(row_data):
-                xls_sheet.cell(row = row+2, column = column+1).value = value
-            if row_data[3].startswith("http"):
-                timeline_sheet.append([row_data[0], row_data[1], "hmm",row_data[3]])
-    """
-
-#Do WLAN_AUTOCONFIG
-wlan_cache = []
-if options.WLAN_EVENTS:
-    print("Enumerating WLAN Autoconfig Log data")
-    xls_sheet = target_wb.create_sheet(title="WLAN Events Data")
-    columns = ['ACTION', 'BSSID','SSID', 'System Time', "Geolocation URL"]
-    for column, value in enumerate(columns):
-        xls_sheet.cell(row = 1, column = column+1).value = value
-    for eachfile in wlan_evts_files:
-        try:
-            evt_data  = parse_wlan_autoconfig(eachfile)
-            wlan_cache = evt_data
-        except Exception as e:
-            print("Unable to process file {0} : {1} ".format(eachfile,e))
+    if event == 'OK':
+        sys_path = pathlib.Path(values.get("_SYSTEMEVENTS_"))
+        if process_sys and (not sys_path.exists() or not sys_path.is_file() or str(sys_path).lower().startswith("c:\windows\system32")):
+            sg.PopupOK("System Event log not found or locked by OS.")
             continue
-        for row, row_data in enumerate(evt_data):
-            for column, value in enumerate(row_data):
-                xls_sheet.cell(row = row+2, column = column+1).value = value
-            if row_data[4].startswith("http"):
-                timeline_sheet.append([row_data[3], row_data[1], row_data[2],row_data[4]])
+        soft_path = pathlib.Path(values.get("_SOFTWARE_"))
+        if not soft_path.exists() or not soft_path.is_file() or str(soft_path).lower().startswith("c:\windows\system32"):
+            sg.PopupOK("SOFTWARE registry file is not found or locked by OS.")
+            continue
+        wlan_path = pathlib.Path(values.get("_WLANEVENTS_"))
+        if process_wlan and (not wlan_path.exists() or not wlan_path.is_file() or str(wlan_path).lower().startswith("c:\windows\system32")):
+            sg.PopupOK("WLAN Event Log is not found or locked by OS.")
+            continue
+        sru_path = pathlib.Path(values.get("_SRU_"))
+        if process_sru and (not sru_path.exists() or not sru_path.is_file() or str(sru_path).lower().startswith("c:\windows\system32")):
+            sg.PopupOK("SRUM database is not found or locked by OS.")
+            continue
+        config_path = pathlib.Path(values.get("_APIKEYS_"))
+        if not config_path.exists() or not config_path.is_file():
+            sg.PopupOK("Configuration File is not found.")
+            continue
+        out_path = pathlib.Path(values.get("_OUTDIR_"))
+        if not out_path.exists() or not out_path.is_dir():
+            sg.PopupOK("The output directory does not seem to be correct.")
+            continue
+        break
+
+window.Close()
+
+config_path = str(config_path)
+soft_path = str(soft_path)
+sys_path = str(sys_path)
+sru_path = str(sru_path)
+config = config.config(config_path)
+if (config.get("google_api_key") == "Your Key Here") or (config.get("wigle_api_user") == "Wigle API Username"):
+    sg.PopupOK("You need API keys for BOTH google and wigle to use this tool.  See werejugo.yaml.")
+    sys.exit(1)
+resolver.config = config
+mylocations = LocationList()
+myevents = EventList(mylocations)
+
+if pathlib.Path("locations.cache").exists() and input("A cache of locations was found from a previous run of this tool. Would you like to reload that information?").lower().startswith("y"):
+    myevents.Locations.load("locations.cache")
+
+print("Discovering locations history... Please be patient")
+mylocations.load_registry_wigle(soft_path)
+
+if process_sys:
+    print("Discovering networks via wifi diagnostic logs...")
+    myevents.load_wifi_diagnostics(sys_path)
+
+if input(f"\n{len(mylocations)} locations discovered.  Would you like to discover more locations by performing an exaustive (very slow) location search? ").lower().startswith("y"):
+    mylocations.load_registry_triangulations(soft_path)
+
+#myevents.Locations.save("locations.cache")
 
 
-firstsheet=target_wb.get_sheet_by_name("Sheet")
-target_wb.remove_sheet(firstsheet)
-target_wb.save(options.OUTPUT)
+#Begin Loading Events
 
-#Output KML
-if options.KML and not options.WIGLE_USER or not options.WIGLE_PASS:
-    print ("\nWARNING: Must use geolocation (Wigle) options to generate KML")
-elif options.KML:
-    print("Creating KML file")
-    kml = simplekml.Kml(name="Wifi Map",description="Visual Wigle Location")
-    for netid in wigle_cache:
-        result = wigle_cache.get(netid)
-        if result["results"]:
-            ssid = result['results'][0]['ssid']
-            lat = result['results'][0]['trilat']
-            lon = result['results'][0]['trilong']
-            lastSeen = result['results'][0]['lasttime']
-            pnt = kml.newpoint(name=ssid, coords=[(lon,lat)])
-            pnt.description = ""
+print(f"Finding Events for {len(mylocations)} locations")
+myevents.load_reg_history(soft_path)
 
-            #Check WLAN cache for actions
-            for action in wlan_cache:
-                if netid in action or ssid in action:
-                    pnt.description += "Action: %s\nTime: %s\n" % (action[0], action[3])
-
-            #Check unmanaged for entries
-            pnt.description += "\nUnmanaged:\n"
-            for entry in unmanaged_cache:
-                if netid in entry:
-                    pnt.description += "First Seen: %s\nLast Seen: %s\nDNS Suffix: %s\n" % (entry[5], entry[6], entry[3])
-
-            #Check managed for entries
-            pnt.description += "\nManaged:\n"
-            for entry in managed_cache:
-                if netid in entry:
-                    pnt.description += "First Seen: %s\nLast Seen: %s\nDNS Suffix: %s\n" % (entry[5], entry[6], entry[3])
-
-    kml.save(options.OUTPUT.strip("xlsx") + "kml")
+if process_sru:
+    myevents.load_srum_wifi(sru_path, soft_path)
+if process_wlan:
+    myevents.load_wlan_autoconfig(soft_path, wlan_path)
 
 
+if len(myevents) > 0:
+    print("Generating Output")
+    myevents.to_files(out_path / "results.html", out_path / "result.kml", program_dir / "template.html")
+    webbrowser.open(out_path / "results.html")
+else:
+    print("No Location Events found.")
