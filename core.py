@@ -265,6 +265,7 @@ verified_aps = [(b'F8-2C-18-07-20-19', b'-88', b'1'), (b'A6-04-60-0D-F9-E7', b'-
 
 if __name__ == "__main__":
     config = config.config("werejugo2.yaml")
+    resolver.config = config
     mylocations = LocationList()
     myevents = EventList(mylocations)
 
