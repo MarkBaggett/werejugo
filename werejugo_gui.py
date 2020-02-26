@@ -139,6 +139,9 @@ soft_path = str(soft_path)
 sys_path = str(sys_path)
 sru_path = str(sru_path)
 config = config.config(config_path)
+if (config.get("google_api_key") == "Your Key Here") or (config.get("wigle_api_user") == "Wigle API Username"):
+    sg.PopupOK("You need API keys for BOTH google and wigle to use this tool.  See werejugo.yaml.")
+    sys.exit(1)
 resolver.config = config
 mylocations = LocationList()
 myevents = EventList(mylocations)
