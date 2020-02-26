@@ -4,6 +4,7 @@ results.html
 results.kml
 /build/*
 /dist/*
+/__pycache_/*
 SOF1
 sr1.dat
 sys.evtx
