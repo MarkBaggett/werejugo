@@ -21,5 +21,5 @@ Run the tool with administrative privileges on the target laptop for live aquist
 
 If you have a forensics image with unlocked files then you can browse to those files manually.
 
-![](.\werejugo.gif)
+![](./werejugo.gif)
 
