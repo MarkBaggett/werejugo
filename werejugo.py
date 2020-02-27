@@ -74,13 +74,13 @@ layout = [[sg.Text('Required: SOFTWARE registry file c:\windows\system32\config\
 [sg.Text("Click here for support via Twitter @MarkBaggett",enable_events=True, key="_SUPPORT_", text_color="Blue")],
 [sg.OK(), sg.Cancel()]] 
 
-if ctypes.windll.shell32.IsUserAnAdmin() == 1:
+if (ctypes.windll.shell32.IsUserAnAdmin() == 1) and esentutl_path.exists():
     layout[-1].append(sg.Button("Auto Acquire Files"))
-else:
+elif esentutl_path.exists():
     sg.PopupOK('Run this tool with Admin priviliges to acquire files from this system.')
     
 # Create the Window
-window = sg.Window('werejugo 0.1', layout)
+window = sg.Window('werejugo 0.9', layout)
 while True:             
     event, values = window.Read()
     if event is None:
