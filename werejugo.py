@@ -1,3 +1,4 @@
+import logging
 import argparse
 import PySimpleGUI as sg
 import itertools
@@ -23,21 +24,27 @@ config_path = "REQUIRED"
 if (program_dir / "werejugo.yaml").exists():
     config_path = str(program_dir / "werejugo.yaml")
 
+log = logging.getLogger("werejugo")
+logfile = logging.FileHandler('werejugo.log')
+logformat = logging.Formatter('%(asctime)s : %(levelname)s : %(module)s : %(message)s')
+logfile.setFormatter(logformat)
+log.setLevel(logging.DEBUG)
+
 
 esentutl_path = pathlib.Path(os.environ.get("COMSPEC")).parent / "esentutl.exe"
 if not esentutl_path.exists():
-    print("ESENTUTL Not found. Automatic extraction is not available.")
+    log.info("ESENTUTL Not found. Automatic extraction is not available.")
 
 
 def extract_live_file():
 
     def extract_file(src,dst, ese = esentutl_path):
         cmdline = rf"{str(ese)} /y {str(src)} /vss /d {str(dst)}"
-        print(cmdline)
-        phandle = subprocess.Popen(cmdline, shell=True,stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        log.info(cmdline)
+        phandle = subprocess.Popen(cmdline, shell=True,stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.PIPE)
         out1,_ = phandle.communicate()
         if (b"returned error" in out1) or (b"Init failed" in out1):
-            print("ERROR\n File Extraction: {}\n".format(out1.decode()))
+            log.info("ERROR\n File Extraction: {}\n".format(out1.decode()))
             return "Error Extracting File"
         return dst
         
@@ -53,7 +60,7 @@ def extract_live_file():
         wlan = extract_file(r"\windows\system32\Winevt\Logs\Microsoft-Windows-WLAN-AutoConfig%4Operational.evtx", extracted_wlan)
         #wlan= "blah"
     except Exception as e:
-        print(f"Error occured {str(e)}")
+        log.info(f"Error occured {str(e)}")
 
     return soft,srum,sys,wlan
         
@@ -176,34 +183,44 @@ resolver.config = config
 mylocations = core.LocationList()
 myevents = core.EventList(mylocations)
 
+
+
+
 #if pathlib.Path("locations.cache").exists() and input("A cache of locations was found from a previous run of this tool. Would you like to reload that information?").lower().startswith("y"):
 #    myevents.Locations.load("locations.cache")
 
-print("Discovering locations history... Please be patient")
+log.info("Discovering locations history... Please be patient")
 mylocations.load_registry_wigle(soft_path)
 
 if process_sys:
-    print("Discovering networks via wifi diagnostic logs...")
+    log.info("Discovering networks via wifi diagnostic logs...")
     myevents.load_wifi_diagnostics(sys_path)
 
 if process_triang:
+    log.info("Discovering networks via wifi triangulation...")
     mylocations.load_registry_triangulations(soft_path)
 
 #myevents.Locations.save("locations.cache")
 
 #Begin Loading Events
 
-print(f"Finding Events for {len(mylocations)} locations")
+log.info(f"Finding Events for {len(mylocations)} locations")
 myevents.load_reg_history(soft_path)
 
 if process_sru:
+    log.info("Finding Events with SRUM")
     myevents.load_srum_wifi(sru_path, soft_path)
+else:
+    log.info("Skipped SRUM processing")
 if process_wlan:
+    log.info("Finding events with WLAN")
     myevents.load_wlan_autoconfig(soft_path, wlan_path)
+else:
+    log.info("Skipped WLAN Processing")
 
 
 if len(myevents) > 0:
-    print("Generating Output")
+    log.info("Generating Output")
     progress_window.Element("pb_out").UpdateBar(1, 3)
     progress_window.Refresh()
     myevents.to_files(out_path / "results.html", out_path / "result.kml", program_dir / "template.html")
@@ -213,6 +230,6 @@ if len(myevents) > 0:
     progress_window.Element("pb_out").UpdateBar(3, 3)
     progress_window.Refresh()
 else:
-    print("No Location Events found.")
+    log.info("No Location Events found.")
 
 progress_window.close()

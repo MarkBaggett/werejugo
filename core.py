@@ -15,6 +15,8 @@ import simplekml
 import PySimpleGUI as sg
 import sys
 
+log = logging.getLogger("werejugo.log")
+
 class LocationItem:
     def __init__(self,latitude, longitude, accuracy, source, notes):
         self.latitude = latitude
@@ -40,7 +42,7 @@ class LocationList(UserList):
         super().__init__(*args,**kwargs)
 
     def save(self, fname):
-        print(f"Dumping cache to file {fname}")
+        log.info(f"Dumping cache to file {fname}")
         data = (list(self.ap_bssids.items()), list(self.ap_ssids.items()), self.data)
         with open(fname,"wb") as fhandle:
             pickle.dump(data, fhandle, protocol=pickle.HIGHEST_PROTOCOL)
@@ -80,7 +82,7 @@ class LocationList(UserList):
             if event=="SKIP":
                 break
             #if (row_num % (int(num_items*.01) or 1)) == 0:
-            #    print("\r|{0:-<50}| {1:3.2f}% {2}/{3}".format("X"*( 50 * row_num//num_items), 100*row_num/num_items, row_num,num_items ),end="")
+            #    log.info("\r|{0:-<50}| {1:3.2f}% {2}/{3}".format("X"*( 50 * row_num//num_items), 100*row_num/num_items, row_num,num_items ),end="")
             row_num += 1
             wig_results = resolver.wigle_search(mac_address)
             if wig_results:
@@ -115,7 +117,7 @@ class Event:
 class EventList(UserList):
     def __init__(self,locations, *args,**kwargs):
         self.Locations = locations
-        print("Please wait while I find all locations.  This will take a long time.")
+        log.info("Please wait while I find all locations.  This will take a long time.")
         super().__init__(*args,**kwargs)
 
     def load_wifi_diagnostics(self, path_to_evtx):
@@ -259,7 +261,7 @@ class EventList(UserList):
         fh.close()
 
     def to_kml(self, output="results.kml"):
-        print("Creating KML file")
+        log.info("Creating KML file")
         kml = simplekml.Kml(name="Wifi Map",description="Visual Wigle Location")
         events_by_location = defaultdict(lambda :[])
         for event in self.data:
@@ -321,7 +323,7 @@ if __name__ == "__main__":
     if pathlib.Path("locations.cache").exists() and input("A cache of locations was found from a previous run of this tool. Would you like to reload that information?").lower().startswith("y"):
         myevents.Locations.load("locations.cache")
 
-    print("Discovering networks via wifi diagnostic logs...")
+    log.info("Discovering networks via wifi diagnostic logs...")
     myevents.load_wifi_diagnostics(".\sys.evtx")
    
     if input(f"\n{len(mylocations)} locations discovered.  Would you like to discover more locations by performing Wigle lookups of known Wireless (PNL)?").lower().startswith("y"):
@@ -338,7 +340,7 @@ if __name__ == "__main__":
 
     #myevents.Locations.save("locations.cache")
 
-    print(f"Working with {len(mylocations)} locations")
+    log.info(f"Working with {len(mylocations)} locations")
 
     #Begin Loading Events
     myevents.load_srum_wifi(".\sr1.dat", ".\sof1")
@@ -346,5 +348,5 @@ if __name__ == "__main__":
     myevents.load_reg_history(".\sof1")
     myevents.to_files("results.html", "result.kml")
     webbrowser.open("results.html")
-    print("EVENTS: \n", myevents)
-    #print("LOCATIONS \n",myevents.Locations)
+    log.info("EVENTS: {myevents}")
+    log.info("LOCATIONS {myevents.Locations}")

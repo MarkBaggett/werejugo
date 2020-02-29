@@ -13,6 +13,8 @@ import pyesedb
 import sys
 import PySimpleGUI as sg
 
+log = logging.getLogger("werejugo.log")
+
 logging.basicConfig(filename='werejugo.log',level=logging.DEBUG)
 log = logging.getLogger()
 
@@ -31,13 +33,13 @@ def google_networks_to_location(networks, key=None):
         response = requests.post(url=url, json= {"considerIP": "false", "wifiAccessPoints": aps}, headers={'Content-Type': 'application/json'})
     except (requests.ConnectTimeout, requests.HTTPError, requests.ReadTimeout, requests.Timeout, requests.ConnectionError) as e:
         delay += 0.5
-        print("exception {str(e)}")
+        log.info(f"exception {str(e)}")
     except Exception as e:
-        print("exception {str(e)}")
+        log.info(f"exception {str(e)}")
     else:
         time.sleep(delay)
         if response.status_code != 200:
-            print(response.text)
+            log.info(response.text)
         json_data = response.json()
         return (json_data['location']['lat'], json_data['location']['lng'], json_data['accuracy'])
 
@@ -65,12 +67,12 @@ def google_triangulate_ap(ap_list, key=None):
     bad_aps = [{'macAddress':'11:11:11:11:11:11'},{'macAddress':'22:22:22:22:22:22'} ]
     response = requests.post(url=url, json= {"considerIP": "false", "wifiAccessPoints": bad_aps}, headers={'Content-Type': 'application/json'})
     if response.status_code != 200:
-         print(f"Error during detection of IP based resolution. {response.text}")
+         log.info(f"Error during detection of IP based resolution. {response.text}")
          return
     ip_based_detection = response.json().get("accuracy")
     results = defaultdict(lambda : [])
     num_combos = len(list(itertools.combinations(ap_list,2)))
-    print(f"Triangulating {num_combos} historical Access Points pairs to determine locations.")
+    log.info(f"Triangulating {num_combos} historical Access Points pairs to determine locations.")
     for row_num, combo in enumerate(itertools.combinations(ap_list, 2)):
         progress_window.Element("pb_triang").UpdateBar(row_num, num_combos-1)
         event,val = progress_window.read(timeout=0)
@@ -79,7 +81,7 @@ def google_triangulate_ap(ap_list, key=None):
         #if not sg.OneLineProgressMeter('Triangulating Network Location with Google...', row_num+1, num_combos, 'key'):
         #    break
         #if (row_num % (int(num_combos*.01) or 1)) == 0:
-        #    print("\r|{0:-<50}| {1:3.2f}%".format("X"*( 50 * row_num//num_combos), 100*row_num/num_combos ),end="")
+        #    log.info("\r|{0:-<50}| {1:3.2f}%".format("X"*( 50 * row_num//num_combos), 100*row_num/num_combos ),end="")
         aps = []
         for name,mac in combo:
             aps.append( {'macAddress':mac, "signalStrength": -50 } )
@@ -87,15 +89,15 @@ def google_triangulate_ap(ap_list, key=None):
             response = requests.post(url=url, json= {"considerIP": "false", "wifiAccessPoints": aps}, headers={'Content-Type': 'application/json'})
         except (requests.ConnectTimeout, requests.HTTPError, requests.ReadTimeout, requests.Timeout, requests.ConnectionError) as e:
             delay += 0.5
-            print("exception {str(e)}")
+            log.info(f"exception {str(e)}")
         except Exception as e:
-            print("exception {str(e)}")
+            log.info(f"exception {str(e)}")
         if delay > 10:
-            print("Too many connection errors. Skipping the rest of the locations")
+            log.info("Too many connection errors. Skipping the rest of the locations")
             break
         time.sleep(delay)
         if response.status_code != 200:
-            print(response.text)
+            log.info(response.text)
         else:
             json_data = response.json()
             if json_data['accuracy'] == ip_based_detection:
@@ -120,12 +122,12 @@ def google_triangulate_ap(ap_list, key=None):
             response = requests.post(url=url, json= {"considerIP": "false", "wifiAccessPoints": aps}, headers={'Content-Type': 'application/json'}, verify=False)
         except (requests.ConnectTimeout, requests.HTTPError, requests.ReadTimeout, requests.Timeout, requests.ConnectionError) as e:
             delay += 0.5
-            print(f"exception {str(e)}")
+            log.info(f"exception {str(e)}")
         except Exception as e:
-            print(f"exception {str(e)}")
+            log.info(f"exception {str(e)}")
         time.sleep(delay)
         if response.status_code != 200:
-            print(response.text)
+            log.info(response.text)
         else:
             json_data = response.json()
             if json_data['accuracy'] == ip_based_detection:
@@ -180,14 +182,14 @@ def load_interfaces(reg_file):
     try:
         reg_handle = Registry(reg_file)
     except Exception as e:
-        print("I could not open the specified SOFTWARE registry key. It is usually located in \Windows\system32\config.  This is an optional value.  If you cant find it just dont provide one.")
-        print("WARNING : ", str(e))
+        log.info("I could not open the specified SOFTWARE registry key. It is usually located in \Windows\system32\config.  This is an optional value.  If you cant find it just dont provide one.")
+        log.info(f"WARNING : {str(e)} ")
         return {}
     try:
         int_keys = reg_handle.open('Microsoft\\WlanSvc\\Interfaces')
     except Exception as e:
-        print("There doesn't appear to be any wireless interfaces in this registry file.")
-        print("WARNING : ", str(e))
+        log.info("There doesn't appear to be any wireless interfaces in this registry file.")
+        log.info(f"WARNING : {str(e)} ")
         return {}
     ssid2bssid = {}
     for eachsubkey in reg_handle.open(r"Microsoft\Windows NT\CurrentVersion\NetworkList\Signatures\Unmanaged").subkeys():
@@ -251,7 +253,7 @@ def file_timestamp(binblob):
 def process_srum(srum, software, tablename = '{DD6636C4-8929-4683-974E-22C046A43763}'):
     #This method must commit pin locations to the database
     #Do the wireless Data sheet
-    print(f"\nProcessing SRUM events in table {tablename}", end="")
+    log.info(f"\nProcessing SRUM events in table {tablename}")
     row_num = 1 #Init to 1, first row will be 2 in spreadsheet (1 is headers)
     entries = []
     ese_db = pyesedb.file()
@@ -260,7 +262,7 @@ def process_srum(srum, software, tablename = '{DD6636C4-8929-4683-974E-22C046A43
     ese_table = ese_db.get_table_by_name(tablename)
     #If the table is not found it returns None
     if not ese_table:
-        print("Unable to find network connections table in SRUM file provided")
+        log.info("Unable to find network connections table in SRUM file provided")
         raise Exception("Unable to find network connections table in SRUM file provided")
     reverse_column_lookup = dict([(x.name,index) for index,x in enumerate(ese_table.columns)])
     for ese_row_num in range(ese_table.number_of_records):
@@ -276,7 +278,6 @@ def process_srum(srum, software, tablename = '{DD6636C4-8929-4683-974E-22C046A43
             bssid,ssid = lookups.get(str(profile),(None,'the profile could not be resolved'))
             if bssid:
                 entries.append((connected,bssid, ssid))
-    print("\n")
     return entries
 
 
@@ -289,21 +290,21 @@ def wigle_search(bssid, wigle_user = None, wigle_pass = None):
     result = ""
     bssid = format_BSSID(bssid)
     if bssid in wigle_cache:
-        print("Repetative search (Retrieving {} from cache.)".format(bssid))
+        log.info("Repetative search (Retrieving {} from cache.)".format(bssid))
         return wigle_cache.get(bssid)
 
     try:
         webresp = requests.get(url, auth = (wigle_user,wigle_pass), params = {'netid' : bssid } )
     except (requests.ConnectTimeout, requests.HTTPError, requests.ReadTimeout, requests.Timeout, requests.ConnectionError) as e:
-        print(f"Web communications error {str(e)}")
+        log.info(f"Web communications error {str(e)}")
     except Exception as e:
-        print(f"Error {str(e)}")
+        log.info(f"Error {str(e)}")
     if webresp.status_code != 200:
-        print("{} There was an error from Wigle. {}".format("*"*25, webresp.reason))
+        log.info("{} There was an error from Wigle. {}".format("*"*25, webresp.reason))
         return None
     wigle_data = webresp.json()
     if wigle_data.get("success") == "False":
-        print(wigle_data.get("message"))
+        log.info(wigle_data.get("message"))
     if wigle_data.get("totalResults", 0):
         lat = wigle_data.get("results")[0].get("trilat")
         long = wigle_data.get("results")[0].get("trilong")
