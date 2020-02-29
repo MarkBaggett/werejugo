@@ -1,12 +1,11 @@
 import logging
+import core
 import argparse
 import PySimpleGUI as sg
 import itertools
 import os
 import pathlib
 import ctypes
-import config
-import core
 import webbrowser
 import resolver
 import sys
