@@ -1,5 +1,6 @@
 import logging
 import core
+import config
 import argparse
 import PySimpleGUI as sg
 import itertools
