@@ -11,6 +11,7 @@ import itertools
 import time
 import pyesedb
 import sys
+import PySimpleGUI as sg
 
 logging.basicConfig(filename='werejugo.log',level=logging.DEBUG)
 log = logging.getLogger()
@@ -22,10 +23,10 @@ def google_networks_to_location(networks, key=None):
     url = config.get("google_api_url").format(key = config.get("google_api_key"))
     #url = 'https://a.radiocells.org/geolocate'
     aps = []
+    count = 0
     for mac,sig,name in networks:
-        if b"-" in mac:
-            mac = mac.replace(b"-",b":")
-        aps.append( {'macAddress':mac.decode() , 'signalStrength': sig.decode(), 'channel': name.decode()} )
+        count += 1
+        aps.append( {'macAddress':mac , 'signalStrength': sig.decode(), 'channel': name.decode()} )
     try:
         response = requests.post(url=url, json= {"considerIP": "false", "wifiAccessPoints": aps}, headers={'Content-Type': 'application/json'})
     except (requests.ConnectTimeout, requests.HTTPError, requests.ReadTimeout, requests.Timeout, requests.ConnectionError) as e:
@@ -39,6 +40,16 @@ def google_networks_to_location(networks, key=None):
             print(response.text)
         json_data = response.json()
         return (json_data['location']['lat'], json_data['location']['lng'], json_data['accuracy'])
+
+
+def format_BSSID(bssid):
+    if isinstance(bssid,bytes):
+        bssid = bssid.decode()
+    bssid = bssid.upper()
+    if "-" in bssid:
+        bssid = bssid.replace("-",":")
+    return bssid
+
 
 def google_triangulate_ap(ap_list, key=None):
     #cheats using a google api key by looking up the data directly with the browser location service
@@ -61,13 +72,17 @@ def google_triangulate_ap(ap_list, key=None):
     num_combos = len(list(itertools.combinations(ap_list,2)))
     print(f"Triangulating {num_combos} historical Access Points pairs to determine locations.")
     for row_num, combo in enumerate(itertools.combinations(ap_list, 2)):
-        if (row_num % (int(num_combos*.01) or 1)) == 0:
-            print("\r|{0:-<50}| {1:3.2f}%".format("X"*( 50 * row_num//num_combos), 100*row_num/num_combos ),end="")
+        progress_window.Element("pb_triang").UpdateBar(row_num, num_combos-1)
+        event,val = progress_window.read(timeout=0)
+        if event=="SKIP":
+            break
+        #if not sg.OneLineProgressMeter('Triangulating Network Location with Google...', row_num+1, num_combos, 'key'):
+        #    break
+        #if (row_num % (int(num_combos*.01) or 1)) == 0:
+        #    print("\r|{0:-<50}| {1:3.2f}%".format("X"*( 50 * row_num//num_combos), 100*row_num/num_combos ),end="")
         aps = []
         for name,mac in combo:
-            if b"-" in mac:
-                mac = mac.replace(b"-",b":")
-            aps.append( {'macAddress':mac.decode(), "signalStrength": -50 } )
+            aps.append( {'macAddress':mac, "signalStrength": -50 } )
         try:
             response = requests.post(url=url, json= {"considerIP": "false", "wifiAccessPoints": aps}, headers={'Content-Type': 'application/json'})
         except (requests.ConnectTimeout, requests.HTTPError, requests.ReadTimeout, requests.Timeout, requests.ConnectionError) as e:
@@ -248,14 +263,14 @@ def process_srum(srum, software, tablename = '{DD6636C4-8929-4683-974E-22C046A43
         print("Unable to find network connections table in SRUM file provided")
         raise Exception("Unable to find network connections table in SRUM file provided")
     reverse_column_lookup = dict([(x.name,index) for index,x in enumerate(ese_table.columns)])
-    count = 0
     for ese_row_num in range(ese_table.number_of_records):
-        count += 1
+        #if not sg.OneLineProgressMeter('Discovering Location Event from SRUM...', count, ese_table.number_of_records, 'key'):
+        #    break
         #"L2ProfileId=6, connectstart = 8"
         profile = smart_retrieve(ese_table, ese_row_num, reverse_column_lookup['L2ProfileId'] )
         connected = smart_retrieve(ese_table, ese_row_num, reverse_column_lookup['TimeStamp'] )
-        if count%10==0:
-            sys.stdout.write(".")
+        #if count%10==0:
+        #    sys.stdout.write(".")
             #sys.stdout.flush()
         if profile:
             bssid,ssid = lookups.get(str(profile),(None,'the profile could not be resolved'))
@@ -272,10 +287,7 @@ def wigle_search(bssid, wigle_user = None, wigle_pass = None):
     wigle_pass = config.get("wigle_api_pass")
     url = config.get("wigle_api_url")
     result = ""
-    if isinstance(bssid, bytes):
-        bssid = bssid.decode()
-    if "-" in bssid:
-        bssid = bssid.replace("-",":")
+    bssid = format_BSSID(bssid)
     if bssid in wigle_cache:
         print("Repetative search (Retrieving {} from cache.)".format(bssid))
         return wigle_cache.get(bssid)

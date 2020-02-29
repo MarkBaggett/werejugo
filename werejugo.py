@@ -5,13 +5,12 @@ import os
 import pathlib
 import ctypes
 import config
-from core import LocationItem, LocationList, Event, EventList
+import core
 import webbrowser
 import resolver
 import sys
 import tempfile
 import subprocess
-
 
 
 if getattr(sys, 'frozen', False):
@@ -20,7 +19,7 @@ elif __file__:
     program_dir = pathlib.Path(__file__)
 
 program_dir = program_dir.resolve().parent
-config_path = "Path to werejugo.yaml"
+config_path = "REQUIRED"
 if (program_dir / "werejugo.yaml").exists():
     config_path = str(program_dir / "werejugo.yaml")
 
@@ -58,19 +57,24 @@ def extract_live_file():
 
     return soft,srum,sys,wlan
         
+sg.theme("SystemDefault")
 
-layout = [[sg.Text('Required: SOFTWARE registry file c:\windows\system32\config\SOFTWARE')],
-[sg.Checkbox('', key='_SOFTCHK_', size=(1,1),default=True,disabled=True), sg.Input(key="_SOFTWARE_"), sg.FileBrowse(target="_SOFTWARE_")],
-[sg.Text('Required: Path to System Events c:\windows\system32\Winevt\Logs\System.evtx')],
-[sg.Checkbox('', key='_SYSCHK_', size=(1,1),default=True), sg.Input(key="_SYSTEMEVENTS_", enable_events=True), sg.FileBrowse(target="_SYSTEMEVENTS_")], 
-[sg.Text('Required: WLAN Event Logs c:\windows\system32\Winevt\Logs\Microsoft-Windows-WLAN-AutoConfig perational.evtx')],
-[sg.Checkbox('', key='_WLANCHK_', size=(1,1),default=True),sg.Input(key="_WLANEVENTS_"), sg.FileBrowse(target="_WLANEVENTS_")],
-[sg.Text('Required: SRUDB.DAT c:\windows\system32\sru\srudb.dat')],
-[sg.Checkbox('', key='_SRUCHK_', size=(1,1),default=True), sg.Input(key="_SRU_"), sg.FileBrowse(target="_SRU_")],
-[sg.Text('REQUIRED: Configuration file with API keys. .\werejugo.yaml')],
+layout = [   
+[sg.Text('SOFTWARE registry file c:\windows\system32\config\SOFTWARE')],
+[sg.Checkbox('', key='_SOFTCHK_', size=(1,1),default=True,disabled=True), sg.Input("REQUIRED",key="_SOFTWARE_"), sg.FileBrowse(target="_SOFTWARE_")],
+[sg.Text('Configuration file with API keys. (.\werejugo.yaml)')],
 [sg.Checkbox('', size=(1,1),default=True,disabled=True), sg.Input(config_path,key='_APIKEYS_'), sg.FileBrowse(target='_APIKEYS_')],
-[sg.Text('REQUIRED: Output folder for results.')],
+[sg.Text('Output folder for results.')],
 [sg.Checkbox('', size=(1,1),default=True,disabled=True), sg.Input(os.getcwd(),key='_OUTDIR_'), sg.FolderBrowse(target='_OUTDIR_')],
+[sg.Checkbox('', key="_TRIANG_", size=(1,1),default=False), sg.Text("Enable Extensive AP Triangulation (Potentially requires HOURS of processing)")],
+[sg.Text('_'*100)],
+[sg.Text('System Events (c:\windows\system32\Winevt\Logs\System.evtx)')],
+[sg.Checkbox('', key='_SYSCHK_', size=(1,1),default=True), sg.Input("Recommended", key="_SYSTEMEVENTS_", enable_events=True), sg.FileBrowse(target="_SYSTEMEVENTS_")], 
+[sg.Text('WLAN Event Logs (c:\windows\system32\Winevt\Logs\Microsoft-Windows-WLAN-AutoConfig perational.evtx)')],
+[sg.Checkbox('', key='_WLANCHK_', size=(1,1),default=True),sg.Input("Recommended", key="_WLANEVENTS_"), sg.FileBrowse(target="_WLANEVENTS_")],
+[sg.Text('SRUDB.DAT c:\windows\system32\sru\srudb.dat')],
+[sg.Checkbox('', key='_SRUCHK_', size=(1,1),default=True), sg.Input("Recommended", key="_SRU_"), sg.FileBrowse(target="_SRU_")],
+
 [sg.Text("Click here for support via Twitter @MarkBaggett",enable_events=True, key="_SUPPORT_", text_color="Blue")],
 [sg.OK(), sg.Cancel()]] 
 
@@ -101,9 +105,11 @@ while True:
             window.Element("_WLANCHK_").Update(value=True)
         continue
 
+    #Get checkbox statuses
     process_wlan = values.get('_WLANCHK_')
     process_sru = values.get('_SRUCHK_') 
     process_sys = values.get('_SYSCHK_')
+    process_triang = values.get("_TRIANG_")
 
     if event == 'OK':
         sys_path = pathlib.Path(values.get("_SYSTEMEVENTS_"))
@@ -130,9 +136,33 @@ while True:
         if not out_path.exists() or not out_path.is_dir():
             sg.PopupOK("The output directory does not seem to be correct.")
             continue
+        #if not process_sru or not process_sys or not process_wlan:
+            #okcancel = sg.PopupOkCancel("WARNING: You have chosed to unselect providing some artificacts.\n This will limit results. Continue?")
+        #    if okcancel == "Cancel":
+        #        continue
         break
 
 window.Close()
+
+layout = [
+[sg.Text('Locations from Registry')],
+[sg.ProgressBar(10000, orientation='h', size=(50, 20), key='pb_reg')],
+[sg.Text('Locations and Events from System Diagnostic Events')],
+[sg.ProgressBar(10000, orientation='h', size=(50, 20), key='pb_diag')],
+[sg.Text('Locations from AP Triangulation')],
+[sg.ProgressBar(10000, orientation='h', size=(50, 20), key='pb_triang')],
+[sg.Text('Events from 2 SRUM Tables (multiple passes)')],
+[sg.ProgressBar(10000, orientation='h', size=(50, 20), key='pb_srum1')],
+[sg.Text('Events from WLAN (multiple passes)')],
+[sg.ProgressBar(10000, orientation='h', size=(50, 20), key='pb_wlan')],
+[sg.Text('Generating Output')],
+[sg.ProgressBar(10000, orientation='h', size=(50, 20), key='pb_out')],
+[sg.Button("SKIP"),sg.Text("Skip the remainer of the item currently processing.")]
+]
+progress_window = sg.Window('Processing Data...', layout)
+progress_window.finalize()
+core.progress_window = progress_window
+resolver.progress_window = progress_window
 
 config_path = str(config_path)
 soft_path = str(soft_path)
@@ -143,11 +173,11 @@ if (config.get("google_api_key") == "Your Key Here") or (config.get("wigle_api_u
     sg.PopupOK("You need API keys for BOTH google and wigle to use this tool.  See werejugo.yaml.")
     sys.exit(1)
 resolver.config = config
-mylocations = LocationList()
-myevents = EventList(mylocations)
+mylocations = core.LocationList()
+myevents = core.EventList(mylocations)
 
-if pathlib.Path("locations.cache").exists() and input("A cache of locations was found from a previous run of this tool. Would you like to reload that information?").lower().startswith("y"):
-    myevents.Locations.load("locations.cache")
+#if pathlib.Path("locations.cache").exists() and input("A cache of locations was found from a previous run of this tool. Would you like to reload that information?").lower().startswith("y"):
+#    myevents.Locations.load("locations.cache")
 
 print("Discovering locations history... Please be patient")
 mylocations.load_registry_wigle(soft_path)
@@ -156,11 +186,10 @@ if process_sys:
     print("Discovering networks via wifi diagnostic logs...")
     myevents.load_wifi_diagnostics(sys_path)
 
-if input(f"\n{len(mylocations)} locations discovered.  Would you like to discover more locations by performing an exaustive (very slow) location search? ").lower().startswith("y"):
+if process_triang:
     mylocations.load_registry_triangulations(soft_path)
 
 #myevents.Locations.save("locations.cache")
-
 
 #Begin Loading Events
 
@@ -175,7 +204,15 @@ if process_wlan:
 
 if len(myevents) > 0:
     print("Generating Output")
+    progress_window.Element("pb_out").UpdateBar(1, 3)
+    progress_window.Refresh()
     myevents.to_files(out_path / "results.html", out_path / "result.kml", program_dir / "template.html")
+    progress_window.Element("pb_out").UpdateBar(2, 3)
+    progress_window.Refresh()
     webbrowser.open(out_path / "results.html")
+    progress_window.Element("pb_out").UpdateBar(3, 3)
+    progress_window.Refresh()
 else:
     print("No Location Events found.")
+
+progress_window.close()
